@@ -40,7 +40,34 @@
           "type": "webview"
         }
       ]
+    },
+    "configuration": {
+    "type": "object",
+    "title": "Aha AI Settings",
+    "properties": {
+      "ahaAI.apiKey": {
+        "type": "string",
+        "default": "",
+        "description": "Your OpenAI API Key"
+      },
+      "ahaAI.model": {
+        "type": "string",
+        "default": "gpt-4o",
+        "description": "OpenAI model to use (e.g. gpt-4o, gpt-4, gpt-3.5-turbo)"
+      },
+      "ahaAI.contextLimit": {
+        "type": "number",
+        "default": 5,
+        "description": "Number of context files to include"
+      },
+      "ahaAI.compression": {
+        "type": "string",
+        "default": "full",
+        "enum": ["full", "summary", "headers"],
+        "description": "Compression level for context"
+      }
     }
+  }
   },
   "scripts": {
     "lint": "eslint .",
