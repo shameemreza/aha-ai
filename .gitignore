@@ -1,0 +1,36 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+.cache/
+
+# VS Code extension build
+.vscode-test/
+.vscode-test-web/
+.vscode-test-resources/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# System files
+Thumbs.db
+ehthumbs.db
+Icon?
+._*
+
+# VS Code workspace settings
+.vscode/
+*.code-workspace
+
+# Logs
+logs
+*.log
+
+# Output folders
+out/
+*.tsbuildinfo
+*.tgz
