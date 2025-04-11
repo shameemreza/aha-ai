@@ -1,3 +1,4 @@
+let globalWebview = null;
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
@@ -32,6 +33,8 @@ webviewView.webview.postMessage({
 
 
     webviewView.webview.html = this.getHtmlForWebview();
+    globalWebview = webviewView.webview;
+
 
     webviewView.webview.onDidReceiveMessage(async message => {
       if (message.command === 'ask') {
@@ -76,7 +79,7 @@ webviewView.webview.postMessage({
           body { font-family: sans-serif; padding: 1rem; margin: 0; }
           input, select, textarea {
             width: 100%; padding: 0.5rem; font-size: 1rem;
-            margin-bottom: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box;
+            margin-bottom: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; resize: vertical; overflow-x: hidden;
           }
           button {
             background: #007acc; color: white; border: none;
@@ -106,6 +109,7 @@ webviewView.webview.postMessage({
           <textarea id="prompt" rows="4" placeholder="Ask something about your WordPress code..."></textarea>
           <button onclick="askGPT()">Ask</button>
           <div id="status"></div>
+          <div id="diagnostics" style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;"></div>
           <pre id="response" style="display: none;"></pre>
 
           <button onclick="toggleSettings()">⚙️ Settings</button>
@@ -164,7 +168,7 @@ webviewView.webview.postMessage({
               const msg = event.data;
               if (msg.type === 'response') {
                document.getElementById('status').textContent = '';
-  const box = document.getElementById('response');
+               const box = document.getElementById('response');
   box.textContent = msg.text;
   box.style.display = 'block';
               } else if (msg.type === 'history') {
@@ -198,6 +202,10 @@ webviewView.webview.postMessage({
   document.getElementById('model').value = msg.settings.model;
   document.getElementById('contextLimit').value = msg.settings.contextLimit;
   document.getElementById('compression').value = msg.settings.compression;
+} else if (msg.type === 'diagnostics') {
+  const d = msg.data;
+  document.getElementById('diagnostics').textContent =
+    'Files: ' + d.totalFiles + ', Tokens: ~' + d.tokenEstimate + ', Skipped: ' + d.skipped;
 }
             });
           </script>
@@ -244,10 +252,11 @@ async function sendToGPT(prompt) {
 
 async function getSelectedContext() {
   const files = [];
+  let totalTokens = 0;
+  let skipped = 0;
 
   for (const p of selectedPaths) {
     const stat = fs.statSync(p);
-
     if (stat.isFile()) {
       files.push(p);
     } else if (stat.isDirectory()) {
@@ -256,37 +265,64 @@ async function getSelectedContext() {
   }
 
   const limited = files.slice(0, contextLimit);
-  const contents = limited.map(f => {
+  const contents = [];
+
+  for (const f of limited) {
     try {
       const raw = fs.readFileSync(f, 'utf-8');
+      let chunk = '';
+
       if (compression === 'full') {
-        return `// FILE: ${f}\n${raw}`;
+        chunk = raw;
+      } else {
+        const lines = raw.split('\n');
+        const headerLines = lines.filter(line =>
+          /^(function|class|\$?[a-zA-Z0-9_]+\s*=\s*function|\s*add_(action|filter))/.test(line.trim())
+        );
+
+        if (compression === 'headers') {
+          chunk = headerLines.join('\n');
+        } else {
+          const docblock = [];
+          let inComment = false;
+          for (const line of lines) {
+            if (!inComment && line.trim().startsWith('/**')) inComment = true;
+            if (inComment) docblock.push(line);
+            if (inComment && line.trim().endsWith('*/')) break;
+          }
+          chunk = `${docblock.join('\n')}\n\n${headerLines.join('\n')}`;
+        }
       }
-  
-      // Header-only mode
-      const lines = raw.split('\n');
-      const headerLines = lines.filter(line =>
-        /^(function|class|\$?[a-zA-Z0-9_]+\s*=\s*function|\s*add_(action|filter))/.test(line.trim())
-      );
-      
-      if (compression === 'headers') {
-        return `// FILE: ${f}\n${headerLines.join('\n')}`;
-      }
-  
-      // Summary mode: top comment + headers
-      const docblock = [];
-      let inComment = false;
-      for (const line of lines) {
-        if (!inComment && line.trim().startsWith('/**')) inComment = true;
-        if (inComment) docblock.push(line);
-        if (inComment && line.trim().endsWith('*/')) break;
-      }
-  
-      return `// FILE: ${f}\n${docblock.join('\n')}\n\n${headerLines.join('\n')}`;
+
+      contents.push(`// FILE: ${f}\n${chunk}`);
+      totalTokens += Math.ceil(chunk.length / 4); // Rough estimate: 1 token ≈ 4 chars
+
     } catch {
-      return `// Skipped unreadable file: ${f}`;
+      skipped++;
     }
-  });
+  }
+
+  // Send diagnostics to UI
+  const panel = vscode.window.activeTextEditor?.viewColumn;
+  vscode.commands.executeCommand('workbench.view.extension.aha-ai');
+  setTimeout(() => {
+    vscode.commands.executeCommand('aha-ai.chatView.focus');
+    //setTimeout(() => {
+      //vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
+   //}, 1000);
+  }, 100);
+
+  if (globalWebview) {
+    globalWebview.postMessage({
+      type: 'diagnostics',
+      data: {
+        totalFiles: limited.length,
+        tokenEstimate: totalTokens,
+        skipped
+      }
+    });
+  }
+  
 
   return contents.join('\n\n');
 }
