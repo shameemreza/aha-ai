@@ -139,7 +139,7 @@ class AhaChatSidebarProvider {
           <div id="contextFiles" style="font-size: 0.85rem; margin-bottom: 1rem;"></div>
           <pre id="response" style="display: none;"></pre>
 
-          <button onclick="toggleSettings()">⚙️ Settings</button>
+          <button onclick="toggleSettings()" style="font-size: 0.75rem; padding: 2px 6px; margin-bottom: 0.5rem;">⚙️ Settings</button>
           <div id="settings">
             <input type="password" id="apiKey" placeholder="OpenAI API Key" />
             <select id="model">
