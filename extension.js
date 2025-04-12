@@ -1,12 +1,13 @@
 let globalWebview = null;
-const vscode = require('vscode');
-const path = require('path');
-const fs = require('fs');
-const axios = require('axios');
+let contextFiles = [];
+const vscode = require("vscode");
+const path = require("path");
+const fs = require("fs");
+const axios = require("axios");
 
-let model = 'gpt-4o';
+let model = "gpt-4o";
 let contextLimit = 5;
-let compression = 'full';
+let compression = "full";
 let recentPrompts = [];
 let selectedPaths = [];
 
@@ -17,57 +18,78 @@ class AhaChatSidebarProvider {
 
   resolveWebviewView(webviewView, context, _token) {
     webviewView.webview.options = {
-      enableScripts: true
+      enableScripts: true,
     };
 
-    const config = vscode.workspace.getConfiguration('ahaAI');
-webviewView.webview.postMessage({
-  type: 'loadSettings',
-  settings: {
-    apiKey: config.get('apiKey') || '',
-    model: config.get('model') || 'gpt-4o',
-    contextLimit: config.get('contextLimit') || 5,
-    compression: config.get('compression') || 'full'
-  }
-});
-
+    const config = vscode.workspace.getConfiguration("ahaAI");
+    webviewView.webview.postMessage({
+      type: "loadSettings",
+      settings: {
+        apiKey: config.get("apiKey") || "",
+        model: config.get("model") || "gpt-4o",
+        contextLimit: config.get("contextLimit") || 5,
+        compression: config.get("compression") || "full",
+      },
+    });
 
     webviewView.webview.html = this.getHtmlForWebview();
     globalWebview = webviewView.webview;
 
-
-    webviewView.webview.onDidReceiveMessage(async message => {
-      if (message.command === 'ask') {
+    webviewView.webview.onDidReceiveMessage(async (message) => {
+      if (message.command === "ask") {
         const projectContext = await getSelectedContext();
         const fullPrompt = `${projectContext}\n\n${message.text}`;
         const response = await sendToGPT(fullPrompt);
-        webviewView.webview.postMessage({ type: 'response', text: response });
+        webviewView.webview.postMessage({ type: "response", text: response });
         recentPrompts.unshift({ q: message.text, a: response });
         recentPrompts = recentPrompts.slice(0, 5);
-        webviewView.webview.postMessage({ type: 'history', history: recentPrompts });
-      } else if (message.command === 'saveSettings') {
+        webviewView.webview.postMessage({
+          type: "history",
+          history: recentPrompts,
+        });
+      } else if (message.command === "saveSettings") {
         const apiKey = message.apiKey;
         model = message.model;
         contextLimit = parseInt(message.contextLimit, 10) || 5;
-        compression = message.compression || 'full';
-      
-        await vscode.workspace.getConfiguration().update('ahaAI.apiKey', apiKey, true);
-        await vscode.workspace.getConfiguration().update('ahaAI.model', model, true);
-        await vscode.workspace.getConfiguration().update('ahaAI.contextLimit', contextLimit, true);
-        await vscode.workspace.getConfiguration().update('ahaAI.compression', compression, true);
-        vscode.window.showInformationMessage('Settings saved.');
-      }
-       else if (message.command === 'selectFolder') {
+        compression = message.compression || "full";
+
+        await vscode.workspace
+          .getConfiguration()
+          .update("ahaAI.apiKey", apiKey, true);
+        await vscode.workspace
+          .getConfiguration()
+          .update("ahaAI.model", model, true);
+        await vscode.workspace
+          .getConfiguration()
+          .update("ahaAI.contextLimit", contextLimit, true);
+        await vscode.workspace
+          .getConfiguration()
+          .update("ahaAI.compression", compression, true);
+        vscode.window.showInformationMessage("Settings saved.");
+      } else if (message.command === "selectFolder") {
         const fileOrFolderUris = await vscode.window.showOpenDialog({
           canSelectFolders: true,
           canSelectFiles: true,
-          canSelectMany: true
+          canSelectMany: true,
         });
         if (fileOrFolderUris) {
-          selectedPaths = fileOrFolderUris.map(f => f.fsPath);
-          vscode.window.showInformationMessage('Folders/files selected.');
-          webviewView.webview.postMessage({ type: 'folders', paths: selectedPaths });
+          selectedPaths = fileOrFolderUris.map((f) => f.fsPath);
+          vscode.window.showInformationMessage("Folders/files selected.");
+          webviewView.webview.postMessage({
+            type: "folders",
+            paths: selectedPaths,
+          });
+          // NEW: Trigger context processing so checkboxes render
+          await getSelectedContext();
         }
+      } else if (message.command === "toggleFile") {
+        if (contextFiles[message.index]) {
+          contextFiles[message.index].included = message.included;
+          await refreshDiagnostics();
+        }
+      } else if (message.command === "clearSelection") {
+        contextFiles = [];
+        selectedPaths = [];
       }
     });
   }
@@ -105,11 +127,16 @@ webviewView.webview.postMessage({
           }
         </style>
         <body>
-          <h3>Aha Chat</h3>
           <textarea id="prompt" rows="4" placeholder="Ask something about your WordPress code..."></textarea>
           <button onclick="askGPT()">Ask</button>
           <div id="status"></div>
           <div id="diagnostics" style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;"></div>
+          <div id="fileActions" style="display: none; margin-bottom: 0.5rem;">
+          <button onclick="selectAll(true)" style="font-size: 0.8rem; padding: 3px 8px;">Select</button>
+          <button onclick="selectAll(false)" style="font-size: 0.8rem; padding: 3px 8px;">Deselect</button>
+          <button onclick="clearFolder()" style="font-size: 0.8rem; padding: 3px 8px;">Clear</button>
+        </div>
+          <div id="contextFiles" style="font-size: 0.85rem; margin-bottom: 1rem;"></div>
           <pre id="response" style="display: none;"></pre>
 
           <button onclick="toggleSettings()">⚙️ Settings</button>
@@ -136,6 +163,20 @@ webviewView.webview.postMessage({
 
           <script>
             const vscode = acquireVsCodeApi();
+            function selectAll(state) {
+  document.querySelectorAll('#contextFiles input[type=checkbox]').forEach(cb => {
+    cb.checked = state;
+    cb.dispatchEvent(new Event('change'));
+  });
+}
+function clearFolder() {
+  document.getElementById('contextFiles').innerHTML = '';
+  document.getElementById('fileActions').style.display = 'none';
+  document.getElementById('diagnostics').textContent = '';
+  document.getElementById('toggleAllFiles').checked = false;
+  vscode.postMessage({ command: 'clearSelection' });
+}
+
 
             function askGPT() {
                const text = document.getElementById('prompt').value;
@@ -205,7 +246,33 @@ webviewView.webview.postMessage({
 } else if (msg.type === 'diagnostics') {
   const d = msg.data;
   document.getElementById('diagnostics').textContent =
-    'Files: ' + d.totalFiles + ', Tokens: ~' + d.tokenEstimate + ', Skipped: ' + d.skipped;
+  'Files: ' + d.contextFiles.length + ', Tokens: ~' + d.tokenEstimate + ', Skipped: ' + d.skipped;
+
+
+  const container = document.getElementById('contextFiles');
+  container.innerHTML = '';
+  const fileActions = document.getElementById('fileActions');
+fileActions.style.display = d.contextFiles.length > 0 ? 'block' : 'none';
+  d.contextFiles.forEach((file, index) => {
+    const row = document.createElement('div');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = file.included;
+    checkbox.dataset.index = index;
+    checkbox.onchange = () => {
+      vscode.postMessage({ command: 'toggleFile', index, included: checkbox.checked });
+    };
+    const label = document.createElement('label');
+let shortName = file.name.split('/').pop();
+if (shortName.length > 20) shortName = shortName.slice(0, 17) + '...';
+label.textContent = shortName + ' (~' + file.tokens + ' tokens)';
+label.title = file.name;
+label.style.marginLeft = '6px';
+
+    row.appendChild(checkbox);
+    row.appendChild(label);
+    container.appendChild(row);
+  });
 }
             });
           </script>
@@ -216,41 +283,43 @@ webviewView.webview.postMessage({
 }
 
 async function sendToGPT(prompt) {
-  const apiKey = vscode.workspace.getConfiguration().get('ahaAI.apiKey');
+  const apiKey = vscode.workspace.getConfiguration().get("ahaAI.apiKey");
   if (!apiKey) {
-    vscode.window.showErrorMessage('No API key set in settings.');
-    return 'Error: Missing API key.';
+    vscode.window.showErrorMessage("No API key set in settings.");
+    return "Error: Missing API key.";
   }
 
   try {
     const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
+      "https://api.openai.com/v1/chat/completions",
       {
         model: model,
         messages: [
           {
-            role: 'system',
-            content: 'You are a WordPress and WooCommerce code assistant. Read project files to identify and fix bugs, suggest features, write or improve code, validate support responses, and contribute to WordPress and WooCommerce. Help build themes, plugins, blocks, and provide support-accurate, human-friendly responses.'
+            role: "system",
+            content:
+              "You are a WordPress and WooCommerce code assistant. Read project files to identify and fix bugs, suggest features, write or improve code, validate support responses, and contribute to WordPress and WooCommerce. Help build themes, plugins, blocks, and provide support-accurate, human-friendly responses.",
           },
-          { role: 'user', content: prompt }
-        ]
+          { role: "user", content: prompt },
+        ],
       },
       {
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        }
-      }
+          "Content-Type": "application/json",
+        },
+      },
     );
     return response.data.choices[0].message.content;
   } catch (error) {
-    vscode.window.showErrorMessage('Failed to get response from ChatGPT.');
-    console.error('❌ Error details:', error.response?.data || error.message);
-    return 'Error: Could not get a response.';
+    vscode.window.showErrorMessage("Failed to get response from ChatGPT.");
+    console.error("❌ Error details:", error.response?.data || error.message);
+    return "Error: Could not get a response.";
   }
 }
 
 async function getSelectedContext() {
+  contextFiles = [];
   const files = [];
   let totalTokens = 0;
   let skipped = 0;
@@ -264,67 +333,82 @@ async function getSelectedContext() {
     }
   }
 
-  const limited = files.slice(0, contextLimit);
+  const limited = new Set(files.slice(0, contextLimit)); // Use limit only for initial default
   const contents = [];
+  contextFiles = [];
 
-  for (const f of limited) {
+  for (const f of files) {
     try {
-      const raw = fs.readFileSync(f, 'utf-8');
-      let chunk = '';
+      const raw = fs.readFileSync(f, "utf-8");
+      let chunk = "";
 
-      if (compression === 'full') {
+      if (compression === "full") {
         chunk = raw;
       } else {
-        const lines = raw.split('\n');
-        const headerLines = lines.filter(line =>
-          /^(function|class|\$?[a-zA-Z0-9_]+\s*=\s*function|\s*add_(action|filter))/.test(line.trim())
+        const lines = raw.split("\n");
+        const headerLines = lines.filter((line) =>
+          /^(function|class|\$?[a-zA-Z0-9_]+\s*=\s*function|\s*add_(action|filter))/.test(
+            line.trim(),
+          ),
         );
 
-        if (compression === 'headers') {
-          chunk = headerLines.join('\n');
+        if (compression === "headers") {
+          chunk = headerLines.join("\n");
         } else {
           const docblock = [];
           let inComment = false;
           for (const line of lines) {
-            if (!inComment && line.trim().startsWith('/**')) inComment = true;
+            if (!inComment && line.trim().startsWith("/**")) inComment = true;
             if (inComment) docblock.push(line);
-            if (inComment && line.trim().endsWith('*/')) break;
+            if (inComment && line.trim().endsWith("*/")) break;
           }
-          chunk = `${docblock.join('\n')}\n\n${headerLines.join('\n')}`;
+          chunk = `${docblock.join("\n")}\n\n${headerLines.join("\n")}`;
         }
       }
 
       contents.push(`// FILE: ${f}\n${chunk}`);
       totalTokens += Math.ceil(chunk.length / 4); // Rough estimate: 1 token ≈ 4 chars
-
+      contextFiles.push({
+        name: f,
+        tokens: Math.ceil(chunk.length / 4),
+        included: limited.has(f)
+      });
     } catch {
       skipped++;
     }
   }
-
+ 
   // Send diagnostics to UI
-  const panel = vscode.window.activeTextEditor?.viewColumn;
-  vscode.commands.executeCommand('workbench.view.extension.aha-ai');
+  vscode.commands.executeCommand("workbench.view.extension.aha-ai");
   setTimeout(() => {
-    vscode.commands.executeCommand('aha-ai.chatView.focus');
+    vscode.commands.executeCommand("aha-ai.chatView.focus");
     //setTimeout(() => {
-      //vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
-   //}, 1000);
+    //vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
+    //}, 1000);
   }, 100);
 
   if (globalWebview) {
     globalWebview.postMessage({
-      type: 'diagnostics',
+      type: "diagnostics",
       data: {
         totalFiles: limited.length,
         tokenEstimate: totalTokens,
-        skipped
-      }
+        skipped,
+        contextFiles,
+      },
     });
   }
-  
+  const includedFiles = contextFiles
+    .filter((f) => f.included)
+    .map((f) => f.name);
 
-  return contents.join('\n\n');
+  // Optional: filter `contents` based on included files
+  const includedContents = contents.filter((content) =>
+    includedFiles.some((name) => content.startsWith(`// FILE: ${name}`)),
+  );
+  return includedContents.join("\n\n");
+
+  return contents.join("\n\n");
 }
 
 function collectFilesRecursively(dir, fileList) {
@@ -340,10 +424,30 @@ function collectFilesRecursively(dir, fileList) {
   }
 }
 
+async function refreshDiagnostics() {
+  const includedFiles = contextFiles.filter((f) => f.included);
+  const totalTokens = includedFiles.reduce((sum, f) => sum + f.tokens, 0);
+  const skipped = contextFiles.filter((f) => !f.included).length;
+
+  if (globalWebview) {
+    globalWebview.postMessage({
+      type: "diagnostics",
+      data: {
+        totalFiles: contextFiles.length,
+        tokenEstimate: totalTokens,
+        skipped,
+        contextFiles,
+      },
+    });
+  }
+}
+
 module.exports = {
   activate(context) {
     const provider = new AhaChatSidebarProvider();
-    context.subscriptions.push(vscode.window.registerWebviewViewProvider('aha-ai.chatView', provider));
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider("aha-ai.chatView", provider),
+    );
   },
-  deactivate() {}
+  deactivate() {},
 };
