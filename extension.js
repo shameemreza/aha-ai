@@ -444,10 +444,13 @@ async function refreshDiagnostics() {
 
 module.exports = {
   activate(context) {
-    const provider = new AhaChatSidebarProvider();
+    const provider = new AhaChatSidebarProvider(context.extensionUri);
     context.subscriptions.push(
       vscode.window.registerWebviewViewProvider("aha-ai.chatView", provider),
     );
+    setTimeout(() => {
+      vscode.commands.executeCommand("aha-ai.chatView.focus");
+    }, 1000);
   },
   deactivate() {},
 };

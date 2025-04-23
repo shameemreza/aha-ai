@@ -1,9 +1,14 @@
 {
   "name": "aha-ai",
+  "publisher": "shameemreza",
   "displayName": "Aha AI",
-  "description": "Dev Assistant powered by ChatGPT",
+  "description": "Dev Assistant powered by OpenAI",
   "version": "0.0.1",
   "icon": "media/logo.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shameemreza/aha-ai.git"
+  },
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -11,11 +16,16 @@
     "Other"
   ],
   "activationEvents": [
-  "onStartupFinished",
-  "onView:aha-ai.chatView",
-  "onCommand:aha-ai.askChatGPT"
-],
+    "onStartupFinished",
+    "onView:aha-ai.chatView",
+    "onCommand:aha-ai.askChatGPT"
+  ],
   "main": "./extension.js",
+  "files": [
+    "media",
+    "extension.js",
+    "node_modules"
+  ],
   "contributes": {
     "commands": [
       {
@@ -36,38 +46,42 @@
       "aha-ai": [
         {
           "id": "aha-ai.chatView",
-          "name": "Aha Chat",
+          "name": "Ask",
           "type": "webview"
         }
       ]
     },
     "configuration": {
-    "type": "object",
-    "title": "Aha AI Settings",
-    "properties": {
-      "ahaAI.apiKey": {
-        "type": "string",
-        "default": "",
-        "description": "Your OpenAI API Key"
-      },
-      "ahaAI.model": {
-        "type": "string",
-        "default": "gpt-4o",
-        "description": "OpenAI model to use (e.g. gpt-4o, gpt-4, gpt-3.5-turbo)"
-      },
-      "ahaAI.contextLimit": {
-        "type": "number",
-        "default": 5,
-        "description": "Number of context files to include"
-      },
-      "ahaAI.compression": {
-        "type": "string",
-        "default": "full",
-        "enum": ["full", "summary", "headers"],
-        "description": "Compression level for context"
+      "type": "object",
+      "title": "Aha AI Settings",
+      "properties": {
+        "ahaAI.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your OpenAI API Key"
+        },
+        "ahaAI.model": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "OpenAI model to use (e.g. gpt-4o, gpt-4, gpt-3.5-turbo)"
+        },
+        "ahaAI.contextLimit": {
+          "type": "number",
+          "default": 5,
+          "description": "Number of context files to include"
+        },
+        "ahaAI.compression": {
+          "type": "string",
+          "default": "full",
+          "enum": [
+            "full",
+            "summary",
+            "headers"
+          ],
+          "description": "Compression level for context"
+        }
       }
     }
-  }
   },
   "scripts": {
     "lint": "eslint .",
